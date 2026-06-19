@@ -10,17 +10,13 @@ validateEnv(["AI_API_KEY", "AI_API_URL", "AI_MODEL", "INTERNAL_SECRET", "ALLOWED
 
 const app = express();
 app.disable("x-powered-by");
-
-// Chỉ nhận JSON, giới hạn size để tránh payload bombing
 app.use(express.json({ limit: "16kb" }));
 
-// Chặn mọi request không đến từ Vercel
-app.use((req, res, next) => {
-  const origin = req.headers["origin"] ?? req.headers["x-forwarded-for"] ?? "";
-  const vercelOrigin = process.env.ALLOWED_VERCEL_ORIGIN;
+// ✅ Health check TRƯỚC middleware chặn
+app.get("/health", (_, res) => res.json({ ok: true }));
 
-  // Railway không expose ra internet trực tiếp — nhưng nếu có,
-  // kiểm tra header x-internal-caller do Vercel gắn vào
+// Chặn request không từ Vercel
+app.use((req, res, next) => {
   const caller = req.headers["x-internal-caller"];
   if (caller !== "vercel-serverless") {
     return res.status(403).json({
@@ -31,16 +27,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Áp dụng middleware theo thứ tự: rate limit → replay → hmac → route
 app.use("/api/ai", rateLimiter, replayGuard, hmacAuth, aiRouter);
 
-// Health check (internal)
-app.get("/health", (_, res) => res.json({ ok: true }));
-
-// 404
 app.use((_, res) => res.status(404).json({ success: false, message: "Not found." }));
 
-// Global error handler — KHÔNG leak stack trace ra client
 app.use((err, req, res, _next) => {
   console.error("[ERROR]", err);
   res.status(500).json({ success: false, message: "Lỗi máy chủ nội bộ." });
